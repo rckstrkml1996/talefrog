@@ -81,16 +81,79 @@ async def process_next_link(update: Update, context):
         return
 
     try:
-        response = requests.get(url)
+        # Добавляем заголовки для имитации браузера
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+
+        # Добавляем таймаут и заголовки
+        response = requests.get(url, headers=headers, timeout=30, verify=False)
+        response.raise_for_status()  # Проверяем статус ответа
+        
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        title = soup.select_one('meta[property="og:title"]')
-        description = soup.select_one('meta[property="og:description"]')
-        image_url = soup.select_one('meta[property="og:image"]')
+        # Расширенный поиск метаданных
+        title = None
+        description = None
+        image_url = None
 
-        title = title.get('content', 'Название не найдено') if title else 'Название не найдено'
-        description = description.get('content', 'Описание не найдено') if description else 'Описание не найдено'
-        image_url = image_url.get('content', None) if image_url else None
+        # Пробуем разные варианты поиска title
+        title_candidates = [
+            soup.select_one('meta[property="og:title"]'),
+            soup.select_one('meta[name="title"]'),
+            soup.title,
+            soup.select_one('h1')
+        ]
+        
+        for candidate in title_candidates:
+            if candidate:
+                title = candidate.get('content', candidate.text) if hasattr(candidate, 'get') else candidate.text
+                break
+
+        # Пробуем разные варианты поиска description
+        desc_candidates = [
+            soup.select_one('meta[property="og:description"]'),
+            soup.select_one('meta[name="description"]'),
+            soup.select_one('meta[name="Description"]')
+        ]
+        
+        for candidate in desc_candidates:
+            if candidate:
+                description = candidate.get('content')
+                break
+
+        # Пробуем разные варианты поиска image
+        img_candidates = [
+            soup.select_one('meta[property="og:image"]'),
+            soup.select_one('meta[property="og:image:url"]'),
+            soup.select_one('link[rel="image_src"]'),
+            soup.select_one('img.primary-image'),
+            soup.select_one('img[class*="main"]'),
+            soup.select_one('img')
+        ]
+        
+        for candidate in img_candidates:
+            if candidate:
+                image_url = candidate.get('content') or candidate.get('href') or candidate.get('src')
+                if image_url:
+                    # Если URL относительный, делаем его абсолютным
+                    if image_url.startswith('/'):
+                        from urllib.parse import urljoin
+                        image_url = urljoin(url, image_url)
+                    break
+
+        title = title or 'Название не найдено'
+        description = description or 'Описание не найдено'
+
+        # Логируем найденные данные
+        print(f"Found data for {url}:")
+        print(f"Title: {title}")
+        print(f"Description: {description}")
+        print(f"Image URL: {image_url}")
 
         keyboard = [
             [InlineKeyboardButton("Оставить", callback_data=f"save|{url}"),
@@ -99,23 +162,35 @@ async def process_next_link(update: Update, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         caption = f"<b>Линк:</b>\n{url}\n<b>Тайтл обьявы:</b>\n{title}\n\n<b>Описание обьявы:</b>\n{description}"
+        
         if image_url:
-            await update.effective_message.reply_photo(
-                photo=image_url, 
-                caption=caption, 
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.HTML
-            )
+            try:
+                await update.effective_message.reply_photo(
+                    photo=image_url, 
+                    caption=caption, 
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML
+                )
+            except Exception as img_error:
+                print(f"Error sending image: {img_error}")
+                await update.effective_message.reply_text(
+                    caption, 
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML
+                )
         else:
             await update.effective_message.reply_text(
                 caption, 
                 reply_markup=reply_markup,
                 parse_mode=ParseMode.HTML
             )
-    except Exception as e:
-        await update.effective_message.reply_text(f"Ошибка при обработке ссылки: {url}\nОшибка: {e}")
-        await process_next_link(update, context)
 
+    except Exception as e:
+        error_message = f"Ошибка при обработке ссылки: {url}\nОшибка: {str(e)}"
+        print(error_message)  # Добавляем вывод ошибки в консоль
+        await update.effective_message.reply_text(error_message)
+        await process_next_link(update, context)
+        
 async def button_handler(update: Update, context):
     query = update.callback_query
     await query.answer()
