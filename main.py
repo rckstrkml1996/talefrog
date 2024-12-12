@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Получение токена из переменной окружения
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TOKEN = os.getenv('7809877984:AAGz2HSxHev8HTBPtdIZpd7dQKAD1KOe6Pc')
 if not TOKEN:
     raise ValueError("No token provided!")
 
