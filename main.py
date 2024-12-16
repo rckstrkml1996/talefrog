@@ -9,35 +9,94 @@ except ModuleNotFoundError:
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
-from requests.sessions import Session
-import warnings
-from urllib3.exceptions import InsecureRequestWarning
+import json
+import os
 
-# Suppress SSL warnings
-warnings.filterwarnings('ignore', category=InsecureRequestWarning)
-
+# Глобальные переменные
 saved_links = []
 pending_links = []
 waiting_for_filename = False
 
-def create_session():
-    session = Session()
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-    }
-    session.headers.update(headers)
-    return session
+# Файлы для хранения ID админов и пользователей
+ADMINS_FILE = "admins.txt"
+USERS_FILE = "users.txt"
+
+def get_date_of_publication(soup: BeautifulSoup) -> str:
+    try:
+        # Ищем все span элементы с возможными классами
+        possible_classes = [
+            "x193iq5w xeuugli x13faqbe x1vvkbs xlh3980 xvmahel x1n0sxbx x1lliihq x1s928wv xhkezso x1gmr53x x1cpjm7i x1fgarty x1943h6x x4zkp8e x3x7a5m x6prxxf xvq8zen xo1l8bm xzsf02u x1yc453h",
+            "x193iq5w xeuugli x13faqbe x1vvkbs x1xmvt09 x1lliihq x1s928wv xhkezso x1gmr53x x1cpjm7i x1fgarty x1943h6x xudqn12 x3x7a5m x6prxxf xvq8zen xo1l8bm xzsf02u x1yc453h"
+        ]
+        
+        for class_name in possible_classes:
+            spans = soup.find_all("span", class_=class_name)
+            for span in spans:
+                if 'Listed' in span.text:
+                    return span.text.strip()
+        return "No information"
+    except Exception as e:
+        return f"Error getting date: {str(e)}"
+
+# Функции для работы с админами и пользователями
+def load_ids_from_file(filename):
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
+            return set(map(int, f.read().splitlines()))
+    return set()
+
+def save_ids_to_file(ids, filename):
+    with open(filename, 'w') as f:
+        f.write('\n'.join(map(str, ids)))
+
+def is_admin(user_id):
+    admins = load_ids_from_file(ADMINS_FILE)
+    return user_id in admins
+
+def is_user(user_id):
+    users = load_ids_from_file(USERS_FILE)
+    return user_id in users
 
 async def start(update: Update, context):
+    user_id = update.effective_user.id
+    
+    if not (is_admin(user_id) or is_user(user_id)):
+        await update.message.reply_text("Пошёл нахуй.\nТвой айди: " + str(user_id))
+        return
+    
     keyboard = [["RESTART"]]
+    if is_admin(user_id):
+        keyboard[0].append("ADD USER")
+    
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text("Отправьте файл со ссылками или введите название для сохранения результатов", reply_markup=reply_markup)
+    await update.message.reply_text(
+        "Кидай ссылка на абьяву",
+        reply_markup=reply_markup
+    )
+
+async def add_user(update: Update, context):
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("Пошел нахуй.")
+        return
+    
+    try:
+        new_user_id = int(update.message.text.split()[1])
+        users = load_ids_from_file(USERS_FILE)
+        users.add(new_user_id)
+        save_ids_to_file(users, USERS_FILE)
+        await update.message.reply_text(f"Пользователь {new_user_id} успешно добавлен.")
+    except (IndexError, ValueError):
+        await update.message.reply_text("Пожалуйста, укажите корректный ID пользователя.\nФормат: /add_user ID")
 
 async def handle_document(update: Update, context):
+    user_id = update.effective_user.id
+    
+    if not (is_admin(user_id) or is_user(user_id)):
+        await update.message.reply_text("У вас нет доступа к боту.")
+        return
+
     global pending_links
     
     if update.message.document:
@@ -55,10 +114,20 @@ async def handle_document(update: Update, context):
         await process_next_link(update, context)
 
 async def handle_text(update: Update, context):
+    user_id = update.effective_user.id
+    
+    if not (is_admin(user_id) or is_user(user_id)):
+        await update.message.reply_text("У вас нет доступа к боту.")
+        return
+
     global waiting_for_filename
     
     if update.message.text == "RESTART":
         await handle_restart(update, context)
+        return
+    
+    if update.message.text == "ADD USER" and is_admin(user_id):
+        await update.message.reply_text("/add_user ID")
         return
     
     if not saved_links:
@@ -78,6 +147,12 @@ async def handle_text(update: Update, context):
         waiting_for_filename = False
 
 async def process_next_link(update: Update, context):
+    user_id = update.effective_user.id
+    
+    if not (is_admin(user_id) or is_user(user_id)):
+        await update.message.reply_text("У вас нет доступа к боту.")
+        return
+
     if not pending_links:
         if saved_links:
             await update.effective_message.reply_text(
@@ -97,22 +172,17 @@ async def process_next_link(update: Update, context):
         return
 
     try:
-        session = create_session()
-        response = session.get(url, verify=False, timeout=10)
-        
-        if 'facebook.com' in url:
-            title = "Facebook Marketplace Item"
-            description = "Facebook content cannot be directly scraped. Please save the link if needed."
-            image_url = None
-        else:
-            soup = BeautifulSoup(response.content, 'html.parser')
-            title = soup.select_one('meta[property="og:title"]')
-            description = soup.select_one('meta[property="og:description"]')
-            image_url = soup.select_one('meta[property="og:image"]')
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
 
-            title = title.get('content', 'Название не найдено') if title else 'Название не найдено'
-            description = description.get('content', 'Описание не найдено') if description else 'Описание не найдено'
-            image_url = image_url.get('content', None) if image_url else None
+        title = soup.select_one('meta[property="og:title"]')
+        description = soup.select_one('meta[property="og:description"]')
+        image_url = soup.select_one('meta[property="og:image"]')
+        publication_date = get_date_of_publication(soup)
+
+        title = title.get('content', 'Название не найдено') if title else 'Название не найдено'
+        description = description.get('content', 'Описание не найдено') if description else 'Описание не найдено'
+        image_url = image_url.get('content', None) if image_url else None
 
         keyboard = [
             [InlineKeyboardButton("Оставить", callback_data=f"save|{url}"),
@@ -120,23 +190,18 @@ async def process_next_link(update: Update, context):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        caption = f"<b>Линк:</b>\n{url}\n<b>Тайтл обьявы:</b>\n{title}\n\n<b>Описание обьявы:</b>\n{description}"
-        
+        caption = (f"<b>Линк:</b>\n{url}\n"
+                  f"<b>Тайтл обьявы:</b>\n{title}\n\n"
+                  f"<b>Описание обьявы:</b>\n{description}\n\n"
+                  f"<b>Дата публикации:</b>\n{publication_date}")
+
         if image_url:
-            try:
-                await update.effective_message.reply_photo(
-                    photo=image_url, 
-                    caption=caption, 
-                    reply_markup=reply_markup,
-                    parse_mode=ParseMode.HTML
-                )
-            except Exception:
-                # If photo sending fails, send as text
-                await update.effective_message.reply_text(
-                    caption, 
-                    reply_markup=reply_markup,
-                    parse_mode=ParseMode.HTML
-                )
+            await update.effective_message.reply_photo(
+                photo=image_url, 
+                caption=caption, 
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
         else:
             await update.effective_message.reply_text(
                 caption, 
@@ -144,10 +209,16 @@ async def process_next_link(update: Update, context):
                 parse_mode=ParseMode.HTML
             )
     except Exception as e:
-        await update.effective_message.reply_text(f"Ошибка при обработке ссылки: {url}\nОшибка: {str(e)}")
+        await update.effective_message.reply_text(f"Ошибка при обработке ссылки: {url}\nОшибка: {e}")
         await process_next_link(update, context)
 
 async def button_handler(update: Update, context):
+    user_id = update.effective_user.id
+    
+    if not (is_admin(user_id) or is_user(user_id)):
+        await update.callback_query.answer("У вас нет доступа к боту.")
+        return
+
     query = update.callback_query
     await query.answer()
 
@@ -161,7 +232,8 @@ async def button_handler(update: Update, context):
     try:
         url = message_text.split('Линк:\n')[1].split('\nТайтл')[0].strip()
         title = message_text.split('Тайтл обьявы:\n')[1].split('\nОписание')[0].strip()
-        description = message_text.split('Описание обьявы:\n')[1].strip()
+        description = message_text.split('Описание обьявы:\n')[1].split('\nДата')[0].strip()
+        publication_date = message_text.split('Дата публикации:\n')[1].strip()
         
         formatted_message = (
             f"<b>Линк:</b>\n"
@@ -169,7 +241,9 @@ async def button_handler(update: Update, context):
             f"<b>Тайтл обьявы:</b>\n"
             f"{title}\n\n"
             f"<b>Описание обьявы:</b>\n"
-            f"{description}"
+            f"{description}\n\n"
+            f"<b>Дата публикации:</b>\n"
+            f"{publication_date}"
         )
     except IndexError:
         formatted_message = message_text
@@ -192,9 +266,15 @@ async def button_handler(update: Update, context):
             parse_mode=ParseMode.HTML
         )
 
-    await process_next_link(update, context)    
+    await process_next_link(update, context)
 
 async def handle_restart(update: Update, context):
+    user_id = update.effective_user.id
+    
+    if not (is_admin(user_id) or is_user(user_id)):
+        await update.message.reply_text("У вас нет доступа к боту.")
+        return
+
     global saved_links, pending_links, waiting_for_filename
     saved_links.clear()
     pending_links.clear()
@@ -202,9 +282,19 @@ async def handle_restart(update: Update, context):
     await update.message.reply_text("Бот перезапущен.")
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token("7809877984:AAGz2HSxHev8HTBPtdIZpd7dQKAD1KOe6Pc").build()
+    # Создаем файлы для админов и пользователей, если их нет
+    if not os.path.exists(ADMINS_FILE):
+        with open(ADMINS_FILE, 'w') as f:
+            f.write("7961435399\n")  # Замените на ваш ID
+
+    if not os.path.exists(USERS_FILE):
+        with open(USERS_FILE, 'w') as f:
+            pass
+
+    app = ApplicationBuilder().token("7721305352:AAGGTi9daJfIJc-NFlz0JVEuZGYTHeI0eLU").build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("add_user", add_user))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(button_handler))
