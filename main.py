@@ -1,14 +1,10 @@
-try:
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
-    from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-    from telegram.constants import ParseMode
-    import logging
-    import sys
-    from requests.exceptions import RequestException
-except ModuleNotFoundError:
-    print("Error: 'python-telegram-bot' library is not installed. Please install it using 'pip install python-telegram-bot'.")
-    exit()
 
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.constants import ParseMode
+import logging
+import sys
+from requests.exceptions import RequestException
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
