@@ -69,8 +69,12 @@ def is_user(user_id):
 def load_cookies():
     if os.path.exists(COOKIES_FILE):
         with open(COOKIES_FILE, 'r') as f:
-            return json.load(f)
+            cookies_list = json.load(f)
+        # Преобразуем список объектов в словарь {name: value}
+        cookies_dict = {cookie['name']: cookie['value'] for cookie in cookies_list}
+        return cookies_dict
     return None
+
 
 
 async def start(update: Update, context):
