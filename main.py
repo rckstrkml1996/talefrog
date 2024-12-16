@@ -352,13 +352,31 @@ async def handle_restart(update: Update, context):
     waiting_for_filename = False
     await update.message.reply_text("Бот перезапущен.")
 
+import logging
+import sys
+from bs4 import BeautifulSoup
+import requests
+import telegram
+from telegram import __version__ as telegram_version
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot_log.txt', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# В конце файла замените проверку версий на:
 if __name__ == "__main__":
     # Проверка версий библиотек
     logger.info("Starting bot...")
     logger.info(f"Python version: {sys.version}")
-    logger.info(f"BeautifulSoup version: {bs4.__version__}")
     logger.info(f"Requests version: {requests.__version__}")
-    logger.info(f"python-telegram-bot version: {telegram.__version__}")
+    logger.info(f"python-telegram-bot version: {telegram_version}")
 
     # Создаем файлы для админов и пользователей, если их нет
     if not os.path.exists(ADMINS_FILE):
