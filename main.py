@@ -15,6 +15,16 @@ from datetime import datetime
 import json
 import os
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot_log.txt', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
 # Глобальные переменные
 saved_links = []
 pending_links = []
