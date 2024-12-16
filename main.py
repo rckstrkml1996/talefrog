@@ -2,6 +2,9 @@ try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
     from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
     from telegram.constants import ParseMode
+    import logging
+    import sys
+    from requests.exceptions import RequestException
 except ModuleNotFoundError:
     print("Error: 'python-telegram-bot' library is not installed. Please install it using 'pip install python-telegram-bot'.")
     exit()
@@ -167,23 +170,64 @@ async def process_next_link(update: Update, context):
 
     url = pending_links.pop(0)
     if not url.startswith("http"):
+        logger.warning(f"Некорректная ссылка: {url}")
         await update.effective_message.reply_text(f"Некорректная ссылка: {url}")
         await process_next_link(update, context)
         return
 
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+
     try:
-        response = requests.get(url)
-        soup = BeautifulSoup(response.content, 'html.parser')
+        logger.info(f"Начало обработки URL: {url}")
+        
+        # Попытка получить страницу
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            logger.info(f"Успешно получен ответ от сервера. Статус: {response.status_code}")
+        except RequestException as e:
+            logger.error(f"Ошибка при получении страницы {url}: {str(e)}")
+            await update.effective_message.reply_text(f"Ошибка при получении страницы: {url}\nОшибка: {str(e)}")
+            await process_next_link(update, context)
+            return
 
-        title = soup.select_one('meta[property="og:title"]')
-        description = soup.select_one('meta[property="og:description"]')
-        image_url = soup.select_one('meta[property="og:image"]')
-        publication_date = get_date_of_publication(soup)
+        # Парсинг страницы
+        try:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            logger.info("Успешно создан объект BeautifulSoup")
+        except Exception as e:
+            logger.error(f"Ошибка при парсинге HTML: {str(e)}")
+            await update.effective_message.reply_text(f"Ошибка при парсинге страницы: {url}\nОшибка: {str(e)}")
+            await process_next_link(update, context)
+            return
 
-        title = title.get('content', 'Название не найдено') if title else 'Название не найдено'
-        description = description.get('content', 'Описание не найдено') if description else 'Описание не найдено'
-        image_url = image_url.get('content', None) if image_url else None
+        # Получение метаданных
+        try:
+            title = soup.select_one('meta[property="og:title"]')
+            description = soup.select_one('meta[property="og:description"]')
+            image_url = soup.select_one('meta[property="og:image"]')
+            publication_date = get_date_of_publication(soup)
 
+            logger.info(f"Найденные метаданные:")
+            logger.info(f"Title meta tag: {title}")
+            logger.info(f"Description meta tag: {description}")
+            logger.info(f"Image URL meta tag: {image_url}")
+            logger.info(f"Publication date: {publication_date}")
+
+            title = title.get('content', 'Название не найдено') if title else 'Название не найдено'
+            description = description.get('content', 'Описание не найдено') if description else 'Описание не найдено'
+            image_url = image_url.get('content', None) if image_url else None
+
+        except Exception as e:
+            logger.error(f"Ошибка при извлечении метаданных: {str(e)}")
+            title = "Название не найдено"
+            description = "Описание не найдено"
+            image_url = None
+            publication_date = "Дата не найдена"
+
+        # Создание клавиатуры и сообщения
         keyboard = [
             [InlineKeyboardButton("Оставить", callback_data=f"save|{url}"),
              InlineKeyboardButton("Удалить", callback_data="delete")]
@@ -195,22 +239,43 @@ async def process_next_link(update: Update, context):
                   f"<b>Описание обьявы:</b>\n{description}\n\n"
                   f"<b>Дата публикации:</b>\n{publication_date}")
 
-        if image_url:
-            await update.effective_message.reply_photo(
-                photo=image_url, 
-                caption=caption, 
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.HTML
-            )
-        else:
-            await update.effective_message.reply_text(
-                caption, 
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.HTML
-            )
+        # Отправка сообщения
+        try:
+            if image_url:
+                logger.info(f"Попытка отправить сообщение с фото: {image_url}")
+                try:
+                    await update.effective_message.reply_photo(
+                        photo=image_url, 
+                        caption=caption, 
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.HTML
+                    )
+                    logger.info("Фото успешно отправлено")
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке фото: {str(e)}")
+                    await update.effective_message.reply_text(
+                        caption, 
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.HTML
+                    )
+            else:
+                logger.info("Отправка сообщения без фото")
+                await update.effective_message.reply_text(
+                    caption, 
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения: {str(e)}")
+            await update.effective_message.reply_text(f"Ошибка при отправке сообщения: {str(e)}")
+
     except Exception as e:
-        await update.effective_message.reply_text(f"Ошибка при обработке ссылки: {url}\nОшибка: {e}")
+        logger.error(f"Неожиданная ошибка при обработке ссылки {url}: {str(e)}")
+        await update.effective_message.reply_text(f"Неожиданная ошибка при обработке ссылки: {url}\nОшибка: {str(e)}")
+    
+    finally:
         await process_next_link(update, context)
+
 
 async def button_handler(update: Update, context):
     user_id = update.effective_user.id
@@ -282,22 +347,35 @@ async def handle_restart(update: Update, context):
     await update.message.reply_text("Бот перезапущен.")
 
 if __name__ == "__main__":
+    # Проверка версий библиотек
+    logger.info("Starting bot...")
+    logger.info(f"Python version: {sys.version}")
+    logger.info(f"BeautifulSoup version: {bs4.__version__}")
+    logger.info(f"Requests version: {requests.__version__}")
+    logger.info(f"python-telegram-bot version: {telegram.__version__}")
+
     # Создаем файлы для админов и пользователей, если их нет
     if not os.path.exists(ADMINS_FILE):
         with open(ADMINS_FILE, 'w') as f:
             f.write("7961435399\n")  # Замените на ваш ID
+        logger.info(f"Created {ADMINS_FILE}")
 
     if not os.path.exists(USERS_FILE):
         with open(USERS_FILE, 'w') as f:
             pass
+        logger.info(f"Created {USERS_FILE}")
 
-    app = ApplicationBuilder().token("7721305352:AAGGTi9daJfIJc-NFlz0JVEuZGYTHeI0eLU").build()
+    try:
+        app = ApplicationBuilder().token("7721305352:AAGGTi9daJfIJc-NFlz0JVEuZGYTHeI0eLU").build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("add_user", add_user))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(CallbackQueryHandler(button_handler))
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("add_user", add_user))
+        app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+        app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Бот запущен!")
-    app.run_polling()
+        logger.info("Bot handlers configured successfully")
+        logger.info("Bot started!")
+        app.run_polling()
+    except Exception as e:
+        logger.error(f"Critical error: {str(e)}")
