@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 import json
 import os
+import fake_useragent
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,12 +33,11 @@ USERS_FILE = "users.txt"
 
 def get_date_of_publication(soup: BeautifulSoup) -> str:
     try:
-        # Ищем все span элементы с возможными классами
         possible_classes = [
             "x193iq5w xeuugli x13faqbe x1vvkbs xlh3980 xvmahel x1n0sxbx x1lliihq x1s928wv xhkezso x1gmr53x x1cpjm7i x1fgarty x1943h6x x4zkp8e x3x7a5m x6prxxf xvq8zen xo1l8bm xzsf02u x1yc453h",
             "x193iq5w xeuugli x13faqbe x1vvkbs x1xmvt09 x1lliihq x1s928wv xhkezso x1gmr53x x1cpjm7i x1fgarty x1943h6x xudqn12 x3x7a5m x6prxxf xvq8zen xo1l8bm xzsf02u x1yc453h"
         ]
-        
+
         for class_name in possible_classes:
             spans = soup.find_all("span", class_=class_name)
             for span in spans:
@@ -47,7 +47,6 @@ def get_date_of_publication(soup: BeautifulSoup) -> str:
     except Exception as e:
         return f"Error getting date: {str(e)}"
 
-# Функции для работы с админами и пользователями
 def load_ids_from_file(filename):
     if os.path.exists(filename):
         with open(filename, 'r') as f:
@@ -65,6 +64,7 @@ def is_admin(user_id):
 def is_user(user_id):
     users = load_ids_from_file(USERS_FILE)
     return user_id in users
+
 
 async def start(update: Update, context):
     user_id = update.effective_user.id
@@ -157,7 +157,7 @@ async def handle_text(update: Update, context):
 
 async def process_next_link(update: Update, context):
     user_id = update.effective_user.id
-    
+
     if not (is_admin(user_id) or is_user(user_id)):
         await update.message.reply_text("У вас нет доступа к боту.")
         return
@@ -181,14 +181,12 @@ async def process_next_link(update: Update, context):
         await process_next_link(update, context)
         return
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    # Используем fake_useragent для рандомизации User-Agent
+    user_agent = fake_useragent.UserAgent().random
+    headers = {'User-Agent': user_agent}
 
     try:
         logger.info(f"Начало обработки URL: {url}")
-        
-        # Попытка получить страницу
         try:
             response = requests.get(url, headers=headers, timeout=30)
             response.raise_for_status()
@@ -199,7 +197,6 @@ async def process_next_link(update: Update, context):
             await process_next_link(update, context)
             return
 
-        # Парсинг страницы
         try:
             soup = BeautifulSoup(response.content, 'html.parser')
             logger.info("Успешно создан объект BeautifulSoup")
@@ -209,23 +206,15 @@ async def process_next_link(update: Update, context):
             await process_next_link(update, context)
             return
 
-        # Получение метаданных
         try:
             title = soup.select_one('meta[property="og:title"]')
             description = soup.select_one('meta[property="og:description"]')
             image_url = soup.select_one('meta[property="og:image"]')
             publication_date = get_date_of_publication(soup)
 
-            logger.info(f"Найденные метаданные:")
-            logger.info(f"Title meta tag: {title}")
-            logger.info(f"Description meta tag: {description}")
-            logger.info(f"Image URL meta tag: {image_url}")
-            logger.info(f"Publication date: {publication_date}")
-
             title = title.get('content', 'Название не найдено') if title else 'Название не найдено'
             description = description.get('content', 'Описание не найдено') if description else 'Описание не найдено'
             image_url = image_url.get('content', None) if image_url else None
-
         except Exception as e:
             logger.error(f"Ошибка при извлечении метаданных: {str(e)}")
             title = "Название не найдено"
@@ -233,7 +222,6 @@ async def process_next_link(update: Update, context):
             image_url = None
             publication_date = "Дата не найдена"
 
-        # Создание клавиатуры и сообщения
         keyboard = [
             [InlineKeyboardButton("Оставить", callback_data=f"save|{url}"),
              InlineKeyboardButton("Удалить", callback_data="delete")]
@@ -241,33 +229,21 @@ async def process_next_link(update: Update, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         caption = (f"<b>Линк:</b>\n{url}\n"
-                  f"<b>Тайтл обьявы:</b>\n{title}\n\n"
-                  f"<b>Описание обьявы:</b>\n{description}\n\n"
-                  f"<b>Дата публикации:</b>\n{publication_date}")
+                   f"<b>Тайтл обьявы:</b>\n{title}\n\n"
+                   f"<b>Описание обьявы:</b>\n{description}\n\n"
+                   f"<b>Дата публикации:</b>\n{publication_date}")
 
-        # Отправка сообщения
         try:
             if image_url:
-                logger.info(f"Попытка отправить сообщение с фото: {image_url}")
-                try:
-                    await update.effective_message.reply_photo(
-                        photo=image_url, 
-                        caption=caption, 
-                        reply_markup=reply_markup,
-                        parse_mode=ParseMode.HTML
-                    )
-                    logger.info("Фото успешно отправлено")
-                except Exception as e:
-                    logger.error(f"Ошибка при отправке фото: {str(e)}")
-                    await update.effective_message.reply_text(
-                        caption, 
-                        reply_markup=reply_markup,
-                        parse_mode=ParseMode.HTML
-                    )
+                await update.effective_message.reply_photo(
+                    photo=image_url,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML
+                )
             else:
-                logger.info("Отправка сообщения без фото")
                 await update.effective_message.reply_text(
-                    caption, 
+                    caption,
                     reply_markup=reply_markup,
                     parse_mode=ParseMode.HTML
                 )
