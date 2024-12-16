@@ -30,6 +30,7 @@ waiting_for_filename = False
 # Файлы для хранения ID админов и пользователей
 ADMINS_FILE = "admins.txt"
 USERS_FILE = "users.txt"
+COOKIES_FILE = "cookies.json"
 
 def get_date_of_publication(soup: BeautifulSoup) -> str:
     try:
@@ -64,6 +65,12 @@ def is_admin(user_id):
 def is_user(user_id):
     users = load_ids_from_file(USERS_FILE)
     return user_id in users
+
+def load_cookies():
+    if os.path.exists(COOKIES_FILE):
+        with open(COOKIES_FILE, 'r') as f:
+            return json.load(f)
+    return None
 
 
 async def start(update: Update, context):
@@ -185,10 +192,13 @@ async def process_next_link(update: Update, context):
     user_agent = fake_useragent.UserAgent().random
     headers = {'User-Agent': user_agent}
 
+    # Загружаем куки
+    cookies = load_cookies()
+
     try:
         logger.info(f"Начало обработки URL: {url}")
         try:
-            response = requests.get(url, headers=headers, timeout=30)
+            response = requests.get(url, headers=headers, cookies=cookies, timeout=30)
             response.raise_for_status()
             logger.info(f"Успешно получен ответ от сервера. Статус: {response.status_code}")
         except RequestException as e:
@@ -257,6 +267,7 @@ async def process_next_link(update: Update, context):
     
     finally:
         await process_next_link(update, context)
+
 
 
 async def button_handler(update: Update, context):
